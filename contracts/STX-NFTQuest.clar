@@ -106,3 +106,113 @@
     )
 )
 
+
+
+;; Team System
+(define-public (create-team (team-id uint))
+    (begin
+        (asserts! (is-none (map-get? teams team-id)) ERR-INVALID-TEAM)
+        (asserts! (is-some (map-get? players tx-sender)) ERR-NOT-FOUND)
+        (ok (map-set teams 
+            team-id 
+            {
+                leader: tx-sender,
+                members: (list tx-sender tx-sender tx-sender tx-sender)
+            }
+        ))
+    )
+)
+
+;; Marketplace System
+(define-public (list-item-for-sale (item-id uint) (price uint))
+    (begin
+        (asserts! (validate-price price) ERR-INVALID-PRICE)
+        (asserts! (own-item item-id) ERR-UNAUTHORIZED)
+        (asserts! (is-valid-item item-id) ERR-NOT-FOUND)
+        (ok (map-set market-listings
+            item-id
+            { 
+                price: price, 
+                seller: tx-sender,
+                active: true 
+            }
+        ))
+    )
+)
+
+(define-public (buy-item (item-id uint))
+    (let (
+        (listing (unwrap! (map-get? market-listings item-id) ERR-NOT-FOUND))
+        (price (get price listing))
+        (seller (get seller listing))
+        (active (get active listing))
+    )
+        (begin
+            (asserts! active ERR-NOT-FOUND)
+            (asserts! (is-valid-item item-id) ERR-NOT-FOUND)
+            (try! (stx-transfer? price tx-sender seller))
+            (try! (nft-transfer? game-item item-id seller tx-sender))
+            (map-set market-listings item-id
+                (merge listing { active: false }))
+            (ok true)
+        )
+    )
+)
+
+;; Game Item Management
+(define-public (mint-item (item-id uint) (recipient principal))
+    (begin
+        (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-ADMIN)
+        (asserts! (is-some (map-get? players recipient)) ERR-NOT-FOUND)
+        (asserts! (not (is-valid-item item-id)) ERR-INVALID-PARAMS)
+        (nft-mint? game-item item-id recipient)
+    )
+)
+
+;; Player Progress
+(define-public (gain-experience (amount uint))
+    (let (
+        (player-data (unwrap! (map-get? players tx-sender) ERR-NOT-FOUND))
+        (current-exp (get experience player-data))
+        (new-exp (+ current-exp amount))
+    )
+        (ok (map-set players 
+            tx-sender
+            (merge player-data { experience: new-exp })
+        ))
+    )
+)
+
+;; Level System
+(define-public (level-up)
+    (let (
+        (player-data (unwrap! (map-get? players tx-sender) ERR-NOT-FOUND))
+        (current-exp (get experience player-data))
+        (current-level (get level player-data))
+        (next-level (+ current-level u1))
+    )
+        (begin
+            (asserts! (validate-level next-level) ERR-INVALID-LEVEL)
+            (asserts! (>= current-exp (* current-level u100)) ERR-INVALID-PARAMS)
+            (ok (map-set players 
+                tx-sender
+                (merge player-data
+                    { 
+                        level: next-level,
+                        experience: u0
+                    }
+                )
+            ))
+        )
+    )
+)
+
+;; Admin Functions
+(define-public (set-admin (new-admin principal))
+    (begin
+        (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-ADMIN)
+        (asserts! (not (is-eq new-admin (var-get admin))) ERR-INVALID-PARAMS)
+        (ok (var-set admin new-admin))
+    )
+)
+
